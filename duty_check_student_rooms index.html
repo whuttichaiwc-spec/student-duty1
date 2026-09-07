@@ -1,0 +1,117 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>ระบบเช็กการทำเวรนักเรียน</title>
+<style>
+*{box-sizing:border-box}body{margin:0;font-family:system-ui,-apple-system,"Segoe UI",sans-serif;background:#f5f7fb;color:#172033}
+header{background:#fff;border-bottom:1px solid #e8ebf2;padding:18px 5%;position:sticky;top:0;z-index:5}
+.head{max-width:1200px;margin:auto;display:flex;align-items:center;justify-content:space-between;gap:15px}.brand{font-size:22px;font-weight:800}.sub{font-size:13px;color:#778099}
+.container{max-width:1200px;margin:28px auto;padding:0 20px}.tabs{display:flex;gap:8px;flex-wrap:wrap;margin:15px 0 22px}.tabs button,.room-btn,.status-btn{border:0;border-radius:10px;padding:10px 16px;background:#e9edf5;color:#34405a;font-weight:700;cursor:pointer}.tabs button.active{background:#172033;color:white}
+.cards{display:grid;grid-template-columns:repeat(4,1fr);gap:14px;margin-bottom:24px}.card{background:white;border:1px solid #e8ebf2;border-radius:16px;padding:18px}.label{color:#778099;font-size:13px}.num{font-size:30px;font-weight:800;margin-top:5px}
+.panel{background:#fff;border:1px solid #e8ebf2;border-radius:16px;padding:20px;margin-bottom:20px}.panel h2{margin:0 0 15px;font-size:18px}
+.rooms{display:grid;grid-template-columns:repeat(5,1fr);gap:12px}.room{border:1px solid #e5e9f1;border-radius:14px;padding:16px}.room strong{font-size:18px}.badge{display:inline-block;margin:10px 0;padding:5px 9px;border-radius:999px;font-size:12px;font-weight:800}.done{background:#e5f8ed;color:#13834b}.missing{background:#ffe9e9;color:#c62828}.wait{background:#fff4d9;color:#a66b00}.actions{display:flex;gap:6px;flex-wrap:wrap}.actions button{padding:7px 9px;font-size:12px}
+table{width:100%;border-collapse:collapse}th,td{text-align:left;padding:12px;border-bottom:1px solid #edf0f5}th{color:#778099;font-size:13px}.progress{height:9px;background:#edf0f5;border-radius:20px;overflow:hidden}.bar{height:100%;background:#172033}
+input[type=date]{padding:10px;border:1px solid #dce1eb;border-radius:10px;font:inherit}.date-row{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:15px}
+.secondary{background:#fff!important;border:1px solid #dce1eb!important}.danger{background:#ffe9e9!important;color:#c62828!important}
+@media(max-width:800px){.cards{grid-template-columns:repeat(2,1fr)}.rooms{grid-template-columns:repeat(2,1fr)}.head{align-items:flex-start;flex-direction:column}}
+@media(max-width:480px){.cards{grid-template-columns:1fr 1fr}.rooms{grid-template-columns:1fr}.container{padding:0 12px}.card{padding:14px}.num{font-size:25px}}
+</style>
+</head>
+<body>
+<header><div class="head"><div><div class="brand">📋 ระบบเช็กการทำเวรนักเรียน</div><div class="sub">เช็กสถานะระดับห้อง ม.1–ม.6</div></div><button class="room-btn secondary" onclick="resetToday()">รีเซ็ตข้อมูลวันนี้</button></div></header>
+<div class="container">
+<div class="date-row"><h1 style="font-size:25px;margin:0">Dashboard</h1><input id="date" type="date" onchange="render()"></div>
+<div class="tabs" id="tabs"></div>
+<div class="cards" id="cards"></div>
+<div class="panel"><h2 id="roomTitle">ทุกระดับชั้น</h2><div class="rooms" id="rooms"></div></div>
+<div class="panel"><h2>📈 กราฟสรุป</h2>
+<div style="position:relative;height:320px"><canvas id="gradeChart"></canvas></div>
+</div>
+<div class="panel"><h2>🥧 สัดส่วนภาพรวม</h2>
+<div style="position:relative;height:300px"><canvas id="overallChart"></canvas></div>
+</div>
+<div class="panel"><h2>🏆 อันดับห้องที่ทำเวรดีที่สุด</h2><div id="ranking"></div></div>
+<div class="panel"><h2>📅 ประวัติย้อนหลัง</h2>
+<div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px">
+<input id="fromDate" type="date"><span style="padding:9px">ถึง</span><input id="toDate" type="date">
+<button class="room-btn" onclick="historyReport()">ดูสรุป</button>
+<button class="room-btn secondary" onclick="exportCSV()">Export CSV</button>
+</div><div id="history"></div>
+</div>
+<div class="panel"><h2>📊 สรุปตามระดับชั้น</h2><table><thead><tr><th>ระดับ</th><th>ทั้งหมด</th><th>ทำแล้ว</th><th>ยังไม่ทำ</th><th>รอตรวจ</th><th>ความเรียบร้อย</th></tr></thead><tbody id="summary"></tbody></table></div>
+</div>
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+<script>
+const grades=["ม.1","ม.2","ม.3","ม.4","ม.5","ม.6"];
+const rooms=grades.flatMap(g=>[1,2,3,4,5].map(n=>g+"/"+n));
+let selected="ทั้งหมด";
+const key=()=> "duty_"+document.getElementById("date").value;
+function today(){let d=new Date(),x=new Date(d.getTime()-d.getTimezoneOffset()*60000);return x.toISOString().slice(0,10)}
+document.getElementById("date").value=today();
+function data(){return JSON.parse(localStorage.getItem(key())||"{}")}
+function save(x){localStorage.setItem(key(),JSON.stringify(x))}
+function setStatus(room,status){let x=data();x[room]=status;save(x);render()}
+function render(){
+ const x=data();
+ document.getElementById("tabs").innerHTML=["ทั้งหมด",...grades].map(g=>`<button class="${selected===g?'active':''}" onclick="selected='${g}';render()">${g}</button>`).join("");
+ const list=selected==="ทั้งหมด"?rooms:rooms.filter(r=>r.startsWith(selected+"/"));
+ let done=list.filter(r=>x[r]==="done").length, miss=list.filter(r=>x[r]==="missing").length, wait=list.length-done-miss;
+ document.getElementById("cards").innerHTML=[
+ ["ห้องทั้งหมด",list.length],["✅ ทำแล้ว",done],["❌ ยังไม่ทำ",miss],["⏳ รอตรวจ",wait]
+ ].map(a=>`<div class="card"><div class="label">${a[0]}</div><div class="num">${a[1]}</div></div>`).join("");
+ document.getElementById("roomTitle").textContent=selected==="ทั้งหมด"?"ทุกระดับชั้น":"ห้องเรียน "+selected;
+ document.getElementById("rooms").innerHTML=list.map(r=>{
+  let s=x[r]||"wait", label=s==="done"?"ทำแล้ว":s==="missing"?"ยังไม่ทำ":"รอตรวจ", cls=s;
+  return `<div class="room"><strong>${r}</strong><br><span class="badge ${cls}">${label}</span>
+  <div class="actions"><button class="status-btn" onclick="setStatus('${r}','done')">✅ ทำแล้ว</button><button class="status-btn" onclick="setStatus('${r}','missing')">❌ ไม่ทำ</button><button class="status-btn" onclick="setStatus('${r}','wait')">⏳ รอตรวจ</button></div></div>`
+ }).join("");
+ document.getElementById("summary").innerHTML=grades.map(g=>{
+  let l=rooms.filter(r=>r.startsWith(g+"/")),d=l.filter(r=>x[r]==="done").length,m=l.filter(r=>x[r]==="missing").length,w=l.length-d-m,p=Math.round(d/l.length*100);
+  return `<tr><td><b>${g}</b></td><td>${l.length}</td><td>${d}</td><td>${m}</td><td>${w}</td><td><div style="display:flex;gap:8px;align-items:center"><div class="progress" style="flex:1"><div class="bar" style="width:${p}%"></div></div>${p}%</div></td></tr>`
+ }).join("");
+}
+function getDateList(a,b){
+ let out=[],d=new Date(a+"T00:00:00"),end=new Date(b+"T00:00:00");
+ while(d<=end){out.push(new Date(d).toISOString().slice(0,10));d.setDate(d.getDate()+1)}
+ return out;
+}
+let gradeChart,overallChart;
+function charts(){
+ const all=rooms, todayData=data();
+ const gd=grades.map(g=>rooms.filter(r=>r.startsWith(g+"/")).filter(r=>todayData[r]==="done").length);
+ const gm=grades.map(g=>rooms.filter(r=>r.startsWith(g+"/")).filter(r=>todayData[r]==="missing").length);
+ const gw=grades.map((g,i)=>5-gd[i]-gm[i]);
+ if(gradeChart) gradeChart.destroy();
+ gradeChart=new Chart(document.getElementById("gradeChart"),{type:"bar",data:{labels:grades,datasets:[
+ {label:"ทำแล้ว",data:gd},{label:"ไม่ทำ",data:gm},{label:"รอตรวจ",data:gw}]},options:{responsive:true,maintainAspectRatio:false,scales:{y:{beginAtZero:true,ticks:{stepSize:1}}}}});
+ const totalD=all.filter(r=>todayData[r]==="done").length,totalM=all.filter(r=>todayData[r]==="missing").length,totalW=30-totalD-totalM;
+ if(overallChart) overallChart.destroy();
+ overallChart=new Chart(document.getElementById("overallChart"),{type:"doughnut",data:{labels:["ทำแล้ว","ไม่ทำ","รอตรวจ"],datasets:[{data:[totalD,totalM,totalW]}]},options:{responsive:true,maintainAspectRatio:false}});
+ const ranking=rooms.map(r=>({r,score:todayData[r]==="done"?100:todayData[r]==="wait"?50:todayData[r]==="missing"?0:50})).sort((a,b)=>b.score-a.score);
+ document.getElementById("ranking").innerHTML=ranking.slice(0,10).map((a,i)=>`<div style="display:flex;justify-content:space-between;padding:10px;border-bottom:1px solid #edf0f5"><b>${i<3?["🥇","🥈","🥉"][i]:i+1+". "} ${a.r}</b><span>${a.score}%</span></div>`).join("");
+}
+function historyReport(){
+ const f=document.getElementById("fromDate").value,t=document.getElementById("toDate").value;
+ if(!f||!t||f>t)return alert("กรุณาเลือกช่วงวันที่ให้ถูกต้อง");
+ const dates=getDateList(f,t);
+ let rows=rooms.map(r=>{
+  let d=dates.filter(dt=>JSON.parse(localStorage.getItem("duty_"+dt)||"{}")[r]==="done").length;
+  return {r,d,p:Math.round(d/dates.length*100)};
+ });
+ document.getElementById("history").innerHTML=`<table><thead><tr><th>ห้อง</th><th>วันที่ทำแล้ว</th><th>อัตราการทำเวร</th></tr></thead><tbody>${rows.map(a=>`<tr><td><b>${a.r}</b></td><td>${a.d}/${dates.length}</td><td>${a.p}%</td></tr>`).join("")}</tbody></table>`;
+}
+function exportCSV(){
+ const d=data();
+ let csv="ห้อง,สถานะ\n"+rooms.map(r=>`${r},${d[r]==="done"?"ทำแล้ว":d[r]==="missing"?"ไม่ทำ":"รอตรวจ"}`).join("\n");
+ const blob=new Blob(["\ufeff"+csv],{type:"text/csv;charset=utf-8"});
+ const a=document.createElement("a");a.href=URL.createObjectURL(blob);a.download="รายงานเวร_"+document.getElementById("date").value+".csv";a.click();URL.revokeObjectURL(a.href);
+}
+function resetToday(){if(confirm("ต้องการรีเซ็ตสถานะของทุกห้องในวันที่เลือกใช่ไหม?")){localStorage.removeItem(key());render()}}
+const oldRender=render;
+render=function(){oldRender();setTimeout(charts,0)}
+render();
+</script>
+</body>
+</html>
